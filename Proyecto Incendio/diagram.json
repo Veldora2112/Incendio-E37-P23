@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "author": "Fundamentos de IoT 2026-2 - U. Autonoma de Chile",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 48, "left": 4.84, "attrs": {} },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "pot1",
+      "top": -87.7,
+      "left": 201.4,
+      "attrs": { "label": "sensor analogico" }
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": -210.9,
+      "left": 81,
+      "attrs": { "temperature": "16.4", "humidity": "51.5" }
+    },
+    { "type": "wokwi-gas-sensor", "id": "gas1", "top": -16.5, "left": -194.6, "attrs": {} },
+    {
+      "type": "wokwi-buzzer",
+      "id": "bz1",
+      "top": 69.6,
+      "left": -190.2,
+      "attrs": { "volume": "0.1" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 99.95,
+      "left": -86.4,
+      "attrs": { "value": "1000" }
+    }
+  ],
+"connections": [
+    [ "pot1:VCC", "esp:3V3", "red", [ "v9.6", "h-240.95" ] ],
+    [ "dht1:VCC", "esp:3V3", "red", [ "h-48", "v76.8", "h-38.55" ] ],
+    [ "dht1:GND", "esp:GND.2", "black", [ "v0" ] ],
+    [ "gas1:VCC", "esp:3V3", "red", [ "h0" ] ],
+    [ "gas1:GND", "esp:GND.2", "black", [ "h28.8", "v-10.4", "h134.4" ] ],
+    [ "r1:1", "bz1:2", "red", [ "v48" ] ],
+    [ "pot1:GND", "esp:GND.2", "black", [ "v86.4" ] ],
+    [ "bz1:1", "esp:GND.2", "black", [ "v153.6", "h316.8", "v-9.6" ] ],
+    [ "gas1:AOUT", "esp:35", "magenta", [ "h48", "v105.6" ] ],
+    [ "pot1:SIG", "esp:34", "magenta", [ "v38.4", "h-259.6", "v96" ] ],
+    [ "r1:2", "esp:33", "red", [ "v0" ] ],
+    [ "dht1:SDA", "esp:32", "gold", [ "v57.6", "h-143.9", "v172.8" ] ]
+  ],
+  "serialMonitor": { "display": "always" },
+  "dependencies": {}
+}
