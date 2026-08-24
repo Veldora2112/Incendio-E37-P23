@@ -1,49 +1,23 @@
-#include "DHT.h"
+#include "HardwareSerial.h"
+#include <Arduino.h>
+#include <atomic>
+#include <cstdint>
+#include <ratio>
+#include "DHTesp.h"
+// Declaracion para el funcionamiento del Sesnor DHT22
+const int DHT_PIN = 15;
+DHTesp dhtSensor;
+const byte MQ = 34; // pin analogico del sensor MQ
 
-/* ==========================================================================
-   FUNDAMENTOS DE IoT - 2do SEMESTRE 2026
-   GT1 (Semana 3) - Proyecto base: cadena de adquisicion en simulacion
-   Universidad Autonoma de Chile - Ingenieria Civil Informatica
-   v1.0 - 2026-2 - R. Rodriguez
+const byte buzzer = 33; // Pin del Buzer
+const byte canalBuzzer = 0;
+const byte IR = 35; // Pin del Sensor IR
 
-   QUE HACE ESTE PROGRAMA
-   Lee una senal analogica, la convierte a magnitud fisica, le aplica una
-   correccion de dos puntos y la filtra. Imprime por el monitor serie, en
-   formato CSV, el tiempo, las cuentas crudas, el valor calibrado y el valor
-   filtrado, para poder comparar las tres columnas.
 
-   COMO SE USA EN LA GT1
-   1. Copien este proyecto en su propia cuenta de Wokwi y renombrenlo E NN-GT1.
-   2. Ejecuten con M_CAL = 1.0 y B_CAL = 0.0 (sin corregir) y anoten la lectura
-      en los DOS puntos de referencia que entrega el docente de la seccion.
-   3. Despejen m y b (ver la funcion de ayuda al final del archivo), escriban
-      los valores en M_CAL y B_CAL, y verifiquen en un TERCER punto.
-   4. Registren m, b, la tolerancia declarada y el criterio de eleccion de N
-      en el README del repositorio del equipo.
 
-   REGLAS DE LA ASIGNATURA QUE ESTE CODIGO RESPETA
-   - Sin delay() en el lazo principal: el muestreo se agenda con millis().
-   - Solo canales del ADC1 (GPIO 32 a 39): el ADC2 queda inutilizable cuando
-     el WiFi esta activo, y desde la Semana 8 el WiFi estara activo.
-   - Toda constante fisica va comentada con su unidad y su origen.
-   ========================================================================== */
-
-// ---------------------------------------------------------------------------
-// 1. Configuracion del equipo  (EDITEN ESTA SECCION)
-// ---------------------------------------------------------------------------
-
-#define DHTpin 32   //pin del Sensor DHT
-#define DHTtype DHT22
-const byte AnalogMQ = 35;   //pin del Sensor analogico del MQ-22
-const byte Buzzer = 33;    //Pin positivo Buzzer
-const uint8_t  PIN_SENSOR   = 34;      // ADC1 canal 6. No usar GPIO 0-27 (ADC2).
-const uint32_t PERIODO_MS   = 500;    // [ms] Periodo de muestreo del taller.
-const uint32_t MuestreoDHT = 25000;     // muestreo independiente para los sensores DHT, IR, MQ
-const uint32_t MuestreoIR = 5000;
-const uint32_t MuestreoMQ = 20000;
-DHT dht(DHTpin, DHTtype);
-                                       // El periodo del nodo real es el que
-                                       // declararon en su plan de datos (ED).
+//Definicion de los ESTADOS
+enum ESTADO {VIGILANCIA, SOSPECHA, ALERTA_CONFIRMADA, ERROR};
+ESTADO estadoActual = VIGILANCIA;
 const uint8_t  N_FILTRO     = 5;       
 const bool     USAR_MEDIANA = false;   // false: media movil | true: mediana
 
@@ -58,81 +32,97 @@ const float OFFSET_SENSOR = 0.65f;      // [grados C] a 0 V, segun hoja de datos
 // Se obtienen midiendo, no se copian de otro equipo.
 const float M_CAL = 0.968f;            // ganancia  (adimensional)
 const float B_CAL = -2.40f;            // offset    [grados C]
-
-// Simulacion explicita del ruido que el ADC real si tiene y el simulador no.
-// Se declara aqui porque en la Semana 4, con el sensor fisico, esta linea
-// se elimina: el ruido deja de ser simulado y pasa a ser un problema real.
-//const bool  SIMULAR_RUIDO = true;
-//const float RUIDO_CUENTAS = 25.0f;     // [cuentas] amplitud del ruido simulado
-
 // ---------------------------------------------------------------------------
-// 2. Estado interno (no requiere edicion)
-// ---------------------------------------------------------------------------
-uint32_t t_ultima_muestra = 0;         // marca de tiempo de la ultima muestra
-float    ventana[16];                  // buffer circular del filtro
-uint8_t  idx_ventana = 0;
-uint8_t  muestras_validas = 0;
+// Estado Interno
+int t_ultima_muestra = 0;
+float ventana[N_FILTRO];
+byte idx_ventana = 0;
+int indice = 0;
+bool ventana_llena = false;
+unsigned muestras_validasMQ = 0;
+byte MQlocales_invalidas;
+unsigned muestras_invalidasMQ = 0;
+unsigned muestas_validasDHT = 0;
+unsigned muestras_invalidasDHT = 0;
+const unsigned short out = 10000;
 
-// ---------------------------------------------------------------------------
-// 3. Funciones auxiliares
-// ---------------------------------------------------------------------------
-
-// Convierte cuentas del ADC a magnitud fisica segun la hoja de datos.
-// Entrada: cuentas [0..4095].  Salida: magnitud [grados C].
-float cuentas_a_fisica(int cuentas) {
-  float tension = (V_REF * cuentas) / CUENTAS_MAX;         // [V]
-  return tension * ESCALA_SENSOR + OFFSET_SENSOR;          // [grados C]
+//=============================
+//INICIO DE DATOS DE MQ-2
+//configuracion para MQ-2
+const float VC_MV = 5000.0;  
+const float RL_KOHM = 2.0;  
+//-------------------------------------------
+//Funciones Auxiliares para MQ-2
+int leer_mv() {                           // promedio de 8 lecturas, en mV
+  long suma = 0;                          // calibradas de fabrica
+  for (int i = 0; i < 5; i++) suma += analogReadMilliVolts(MQ);
+  return (int)(suma / 5);
 }
 
-// Aplica la correccion de dos puntos:  y_corregido = m * y_medido + b
-float aplicar_calibracion(float valor_medido) {
-  return M_CAL * valor_medido + B_CAL;
+int filtrar(int valor) {                  // media movil de N_FILTRO muestras
+  ventana[indice] = valor;
+  indice = (indice + 1) % N_FILTRO;
+  if (indice == 0) ventana_llena = true;
+
+  int tope = ventana_llena ? N_FILTRO : indice;
+  long suma = 0;
+  for (int i = 0; i < tope; i++) suma += ventana[i];
+  return (int)(suma / tope);
 }
 
-// Media movil sobre la ventana.
-float media_movil() {
-  float suma = 0.0f;
-  for (uint8_t i = 0; i < muestras_validas; i++) suma += ventana[i];
-  return (muestras_validas > 0) ? (suma / muestras_validas) : 0.0f;
+float resistencia_kohm(int mv) {          // divisor RS-RL del modulo
+  if (mv <= 0) return -1.0;               // lectura invalida
+  return RL_KOHM * (VC_MV - mv) / mv;
 }
+/*
+Funcionamiento en loop()
+  unsigned long ahora = millis();
 
-// Mediana sobre la ventana. Elimina picos aislados sin arrastrar el valor.
-float mediana() {
-  if (muestras_validas == 0) return 0.0f;
-  float copia[16];
-  for (uint8_t i = 0; i < muestras_validas; i++) copia[i] = ventana[i];
-  for (uint8_t i = 1; i < muestras_validas; i++) {      // insercion simple
-    float clave = copia[i];
-    int8_t j = i - 1;
-    while (j >= 0 && copia[j] > clave) { copia[j + 1] = copia[j]; j--; }
-    copia[j + 1] = clave;
-  }
-  return copia[muestras_validas / 2];
-}
+  if (ahora - t_previo >= PERIODO_MS) {
+    t_previo = ahora;
+    n_muestra++;
 
+    int crudo = leer_mv();
+    int filtrado = filtrar(crudo);
+    float rs = resistencia_kohm(filtrado);
 
+    Serial.printf("%lu,%lu,%d,%d,%.2f\n",
+                  n_muestra, ahora / 1000, crudo, filtrado, rs);
+*/
+//FIN DATOS DE MQ-2
+//===========================================================================
+//INICIO DE DATOS DE IR
+//Configuraciones extras para el funcionamiento del Sensor IR
+//  pinMode(PIN_LLAMA, INPUT_PULLUP);       Se declara con INPUT_PULLUP en setuo
+// y al ser digital tiene solo dos posibles valores
+//=======================================
+/*INICIO DE DATOS DEL SESNSOR DHT22*/
+/*Funcionamiento el loop (Para toma de medidas)
 
+TempAndHumidity  data = dhtSensor.getTempAndHumidity();
+    Serial.println("Temp: " + String(data.temperature, 2) + "°C");
+    Serial.println("Humidity: " + String(data.humidity, 1) + "%");
+    Serial.println("---");
+
+*/
+
+// --------------------------------------------------------------------------
+//Definicion del tiempo de muestreo para cada sensor
+const int muestreoMS = 500;
+const int muestreoDHT = 2000;
+const int muestreoIR = 500;
+const int muestreoMQ = 3000;
+
+unsigned long muestraMQ = 0;
+unsigned long muestraIR = 0;
+unsigned long muestraDHT = 0;
 // ---------------------------------------------------------------------------
-// 4. Programa
-// ---------------------------------------------------------------------------
-void setup() {
-  Serial.begin(115200);
-  delay(500);
-  Serial.println("Hola Mundo");
-  analogReadResolution(12);            // 12 bits: 0 a 4095
-  Serial.println("t_ms,cuentas,calibrado_C,filtrado_C");   // cabecera CSV
-  dht.begin();
-  pinMode(AnalogMQ, INPUT);
-  pinMode(PIN_SENSOR, INPUT);
-  pinMode(Buzzer, OUTPUT);
-
-}
-
-byte LecturaIR(){
+//Funcion provisional ya que no hay sensor IR en Wokwi
+byte LecturaIR(){ 
     static unsigned long ultimoTiempo = 0;
     static int distancia = 1;
-    int lectura = analogRead(PIN_SENSOR);
-    if (millis() - ultimoTiempo >= MuestreoIR){
+    int lectura = analogRead(IR);
+    if (millis() - ultimoTiempo >= muestreoIR){
       ultimoTiempo = millis();
       if (lectura < 4095/2){
         distancia = 1;
@@ -142,90 +132,119 @@ byte LecturaIR(){
     }
     return distancia;
 }
-
-float LecturaTempDHT(){
-    static float t = 0;
-    static unsigned long ultimoTiempo = 0;
-    if(millis() - ultimoTiempo >= MuestreoDHT){
-      ultimoTiempo = millis();
-        t = dht.readTemperature();
-    }
-    return t;
+int lecturaMQ(){
+    int mV = leer_mv();
+    int filtrado = filtrar(mV);
+    return filtrado;
 }
 
-float LecturaHumDHT(){
-  static float h = 0;
-  static unsigned long ultimoTiempo = 0;
-  if(millis() - ultimoTiempo >= MuestreoDHT){
-    ultimoTiempo = millis();
-      h = dht.readHumidity();
+void cambioEstado(ESTADO actual){
+    estadoActual = actual;
+    // Agregar print para ver el cambio de estado 
+}
+/*
+void avisar(bool encender) {              // zumbador pasivo: tono, no nivel
+  if (encender) tone(buzzer, 2000);
+  else noTone(buzzer);
+}
+*/
+
+void avisar(bool encender) {              // zumbador pasivo: tono, no nivel
+  if (encender) {
+    ledcWriteTone(canalBuzzer, 2000);     // Emite el tono de 2000 Hz
+  } else {
+    ledcWriteTone(canalBuzzer, 0);        // Frecuencia 0 para silenciar (equivale a noTone)
   }
-  return h;
 }
 
-float LecturaMQ(){
-    static unsigned long ultimoTiempo = 0;
-    static int adc = 0;
-    if(millis() - ultimoTiempo >= MuestreoDHT){
-      ultimoTiempo = millis();
-      int lectura = analogRead(AnalogMQ);
-      adc = cuentas_a_fisica(lectura);  //conversion Item 3
-    }
-    return adc;
+void setup() {
+    Serial.begin(115200);
+    dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
+    analogSetPinAttenuation(MQ, ADC_11db);
+    //pinMode(IR, INPUT_PULLUP); 
+    pinMode(IR, INPUT);
+    //pinMode(buzzer, OUTPUT);
+    // Inicializa el canal 0 a 2000Hz con resolución de 8 bits
+    ledcSetup(canalBuzzer, 2000, 8);
+    ledcAttachPin(buzzer, canalBuzzer);
+
 }
 
 void loop() {
+    /*
+    1. Recopilacion de datos
+    2. FMS (funcion interna la cual debe de cambiar el estado, no cambiarlo manualmente )
+    3. Actuador
+    Composicion del loop para un correcto funcionamiento, 
+    */
 
-  uint32_t ahora = millis();
-  byte valor = 28;
-  // Muestreo agendado: el lazo nunca se bloquea, de modo que mas adelante
-  // puede convivir con la maquina de estados (Semana 4) y con la publicacion
-  // MQTT (Semana 8) sin reescribir esta estructura.
-  if (ahora - t_ultima_muestra >= PERIODO_MS) {
-    t_ultima_muestra = ahora;
+    unsigned long tiempo = millis();
+    int MQfiltrado;
+    float resistenciaMQ;
+    byte estadoIR;
+    byte t;
+    byte h;
+    unsigned short tiempo_sospecha;
+    bool senal;
+    //primer condicional: Ingesta de datos de MQ
+    if (tiempo - muestraMQ > muestreoMQ){
+        muestraMQ = tiempo;
+        MQfiltrado = lecturaMQ();
+        resistenciaMQ = resistencia_kohm(MQfiltrado);
 
-    float IR = LecturaIR();
-    float humedad = LecturaHumDHT();
-    float temp = LecturaTempDHT();
+        if (resistenciaMQ == -1.0) {
+            muestras_invalidasMQ += 1;
+            MQlocales_invalidas += 1;
+        }
+        else muestras_validasMQ += 1;
+        //agregar print para json
+    }
+    
+    //segundo condicional: recopilacion de dato del IR
+    if (tiempo - muestraIR > muestreoIR){
+        //estadoIR = digitalRead(IR);
+        estadoIR = LecturaIR();
+    }
 
-    float calibrado = aplicar_calibracion(valor);      // correccion  (item 4)
-    float cuentas = LecturaMQ();
-    ventana[idx_ventana] = calibrado;                  // filtrado    (item 5)
-    idx_ventana = (idx_ventana + 1) % N_FILTRO;
-    if (muestras_validas < N_FILTRO) muestras_validas++;
 
-    float filtrado = USAR_MEDIANA ? mediana() : media_movil();
+    //tercer condicional: recopilacion de datos de DHT
+    if (tiempo - muestraDHT > muestreoDHT){
+        TempAndHumidity  data = dhtSensor.getTempAndHumidity();
+        t = data.temperature;
+        h = data.humidity;
+        //agregar condicional para aumentar muestras invalidas
+        //agregar print para json
+    }
 
-    Serial.printf("%lu,%.2f,%.2f,%.2f\n", ahora, cuentas, calibrado, filtrado);
-  }
+    switch (estadoActual) {
+        case VIGILANCIA:
+            Serial.println("Estado VIGILANCIA");
+            senal = false;
+            if (resistenciaMQ <= 3.5 || estadoIR == 0) cambioEstado(SOSPECHA);
+            else if (resistenciaMQ <= 3.5 && estadoIR == 0 ) cambioEstado(ALERTA_CONFIRMADA);
+            else if(muestras_invalidasMQ == 3){
+                MQlocales_invalidas = 0;
+                cambioEstado(ERROR);
+            }
+            break;
+        case SOSPECHA:
+            Serial.println("Estado SOSPECHA");
+            senal = false;
+            tiempo_sospecha = millis();
+            if (resistenciaMQ <= 3.5 && estadoIR == 0 ) cambioEstado(ALERTA_CONFIRMADA);
+            else if (tiempo_sospecha >= out) cambioEstado(VIGILANCIA);
+            break;
+        case ALERTA_CONFIRMADA:
+            Serial.println("Estado ALERTA");
+            senal = true;
+            avisar(senal);
+            if (estadoIR == 1 && resistenciaMQ >= 4) cambioEstado(VIGILANCIA);
+            else if (resistenciaMQ >= 1.7 && estadoIR == 1) cambioEstado(SOSPECHA);
+            break;
+        case ERROR:
+            Serial.println("Estado ERROR");
+            if (MQlocales_invalidas < 3 ) cambioEstado(VIGILANCIA);
+            break;
+    }
 
-  // Aqui NO va delay(). El resto del lazo queda libre para las semanas
-  // siguientes: maquina de estados, lectura de botones, publicacion MQTT.
 }
-
-/* ==========================================================================
-   AYUDA PARA EL ITEM 4 - CALIBRACION DE DOS PUNTOS
-
-   Con M_CAL = 1.0 y B_CAL = 0.0, midan en los dos puntos de referencia que
-   entrega el docente:
-
-       Referencia 1 = R1     Lectura obtenida = M1
-       Referencia 2 = R2     Lectura obtenida = M2
-
-   Entonces:
-
-       m = (R2 - R1) / (M2 - M1)
-       b =  R1 - m * M1
-
-   Escriban m en M_CAL y b en B_CAL, vuelvan a simular y verifiquen en un
-   TERCER punto de referencia. El error en ese tercer punto debe caer dentro
-   de la tolerancia que su equipo declaro para el proyecto.
-
-   ADVERTENCIA: si R1 y R2 estan muy proximos, (M2 - M1) es pequeno y la
-   ganancia se dispara. Los dos puntos deben estar separados dentro del rango
-   de trabajo del sensor.
-
-   ADVERTENCIA 2: ajustar m y b hasta que el tercer punto "de bien" no es
-   calibrar. Los dos puntos determinan la recta; el tercero solo la verifica.
-   ========================================================================== */
-
