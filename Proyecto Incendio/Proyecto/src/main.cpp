@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <ratio>
 #include "DHTesp.h"
+#include <iostream>
 // Declaracion para el funcionamiento del Sesnor DHT22
 const int DHT_PIN = 15;
 DHTesp dhtSensor;
@@ -18,6 +19,7 @@ const byte IR = 35; // Pin del Sensor IR
 //Definicion de los ESTADOS
 enum ESTADO {VIGILANCIA, SOSPECHA, ALERTA_CONFIRMADA, ERROR};
 ESTADO estadoActual = VIGILANCIA;
+ESTADO anterior;
 const uint8_t  N_FILTRO     = 5;       
 const bool     USAR_MEDIANA = false;   // false: media movil | true: mediana
 
@@ -137,9 +139,32 @@ int lecturaMQ(){
     int filtrado = filtrar(mV);
     return filtrado;
 }
-
+// {VIGILANCIA, SOSPECHA, ALERTA_CONFIRMADA, ERROR};
 void cambioEstado(ESTADO actual){
     estadoActual = actual;
+    const char* nombre = "";
+    if (actual != anterior){
+        anterior = actual;
+        switch (actual){
+            case VIGILANCIA:{
+                nombre = "VIGILANCIA";
+                break;
+            }
+            case SOSPECHA:{
+                nombre = "SOSPECHA";
+                break;
+            }
+            case ALERTA_CONFIRMADA:{
+                nombre = "ALERTA CONFIRMADA";
+                break;
+            }
+            case ERROR:{
+                nombre = "ERROR";
+                break;
+            }
+        }
+        Serial.println(nombre);
+    }
     // Agregar print para ver el cambio de estado 
 }
 /*
@@ -165,8 +190,10 @@ void setup() {
     pinMode(IR, INPUT);
     //pinMode(buzzer, OUTPUT);
     // Inicializa el canal 0 a 2000Hz con resolución de 8 bits
+    
     ledcSetup(canalBuzzer, 2000, 8);
     ledcAttachPin(buzzer, canalBuzzer);
+    
 
 }
 
@@ -218,7 +245,6 @@ void loop() {
 
     switch (estadoActual) {
         case VIGILANCIA:
-            Serial.println("Estado VIGILANCIA");
             senal = false;
             if (resistenciaMQ <= 3.5 || estadoIR == 0) cambioEstado(SOSPECHA);
             else if (resistenciaMQ <= 3.5 && estadoIR == 0 ) cambioEstado(ALERTA_CONFIRMADA);
@@ -228,21 +254,19 @@ void loop() {
             }
             break;
         case SOSPECHA:
-            Serial.println("Estado SOSPECHA");
             senal = false;
             tiempo_sospecha = millis();
             if (resistenciaMQ <= 3.5 && estadoIR == 0 ) cambioEstado(ALERTA_CONFIRMADA);
             else if (tiempo_sospecha >= out) cambioEstado(VIGILANCIA);
             break;
+            // implementar contador para cambiar a vigilancia
         case ALERTA_CONFIRMADA:
-            Serial.println("Estado ALERTA");
             senal = true;
             avisar(senal);
             if (estadoIR == 1 && resistenciaMQ >= 4) cambioEstado(VIGILANCIA);
             else if (resistenciaMQ >= 1.7 && estadoIR == 1) cambioEstado(SOSPECHA);
             break;
         case ERROR:
-            Serial.println("Estado ERROR");
             if (MQlocales_invalidas < 3 ) cambioEstado(VIGILANCIA);
             break;
     }
