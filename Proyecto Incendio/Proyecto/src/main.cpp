@@ -144,7 +144,9 @@ void cambioEstado(ESTADO actual){
     estadoActual = actual;
     const char* nombre = "";
     if (actual != anterior){
+        MQlocales_invalidas = 0;
         anterior = actual;
+        
         switch (actual){
             case VIGILANCIA:{
                 nombre = "VIGILANCIA";
@@ -182,6 +184,20 @@ void avisar(bool encender) {              // zumbador pasivo: tono, no nivel
   }
 }
 
+bool isEsperaMaxima(){
+    static int tiempo;
+    bool flag;
+    if (estadoActual == SOSPECHA){
+        tiempo += millis();
+        flag = false;
+    }
+    if (tiempo >= out){
+        tiempo = 0;
+        flag = true;
+    }
+    return flag;
+}
+
 void setup() {
     Serial.begin(115200);
     dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
@@ -211,8 +227,8 @@ void loop() {
     byte estadoIR;
     byte t;
     byte h;
-    unsigned short tiempo_sospecha;
     bool senal;
+    unsigned long tiempo_sospecha;
     //primer condicional: Ingesta de datos de MQ
     if (tiempo - muestraMQ > muestreoMQ){
         muestraMQ = tiempo;
@@ -255,9 +271,12 @@ void loop() {
             break;
         case SOSPECHA:
             senal = false;
-            tiempo_sospecha = millis();
             if (resistenciaMQ <= 3.5 && estadoIR == 0 ) cambioEstado(ALERTA_CONFIRMADA);
-            else if (tiempo_sospecha >= out) cambioEstado(VIGILANCIA);
+            else if (isEsperaMaxima()) cambioEstado(VIGILANCIA);
+            else if(muestras_invalidasMQ == 3){
+                MQlocales_invalidas = 0;
+                cambioEstado(ERROR);
+            }
             break;
             // implementar contador para cambiar a vigilancia
         case ALERTA_CONFIRMADA:
@@ -265,6 +284,10 @@ void loop() {
             avisar(senal);
             if (estadoIR == 1 && resistenciaMQ >= 4) cambioEstado(VIGILANCIA);
             else if (resistenciaMQ >= 1.7 && estadoIR == 1) cambioEstado(SOSPECHA);
+            else if(muestras_invalidasMQ == 3){
+                MQlocales_invalidas = 0;
+                cambioEstado(ERROR);
+            }
             break;
         case ERROR:
             if (MQlocales_invalidas < 3 ) cambioEstado(VIGILANCIA);
