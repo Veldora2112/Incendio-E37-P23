@@ -120,7 +120,20 @@ unsigned long muestraIR = 0;
 unsigned long muestraDHT = 0;
 // ---------------------------------------------------------------------------
 //Funcion provisional ya que no hay sensor IR en Wokwi
-
+byte LecturaIR(){ 
+    static unsigned long ultimoTiempo = 0;
+    static int distancia = 1;
+    int lectura = analogRead(IR);
+    if (millis() - ultimoTiempo >= muestreoIR){
+      ultimoTiempo = millis();
+      if (lectura < 4095/2){
+        distancia = 1;
+      }else if (lectura > 4095/2){
+        distancia = 0;
+      }
+    }
+    return distancia;
+}
 int lecturaMQ(){
     int mV = leer_mv();
     int filtrado = filtrar(mV);
@@ -189,7 +202,8 @@ void setup() {
     Serial.begin(115200);
     dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
     analogSetPinAttenuation(MQ, ADC_11db);
-    pinMode(IR, INPUT_PULLUP); 
+    //pinMode(IR, INPUT_PULLUP); 
+    pinMode(IR, INPUT);
     //pinMode(buzzer, OUTPUT);
     // Inicializa el canal 0 a 2000Hz con resolución de 8 bits
     
@@ -208,13 +222,13 @@ void loop() {
     */
 
     unsigned long tiempo = millis();
-    static int MQfiltrado;
-    static float resistenciaMQ;
-    static byte estadoIR;
-    static byte t;
-    static byte h;
-    static bool senal;
-    static unsigned long tiempo_sospecha;
+    int MQfiltrado;
+    float resistenciaMQ;
+    byte estadoIR;
+    byte t;
+    byte h;
+    bool senal;
+    unsigned long tiempo_sospecha;
     //primer condicional: Ingesta de datos de MQ
     if (tiempo - muestraMQ > muestreoMQ){
         muestraMQ = tiempo;
