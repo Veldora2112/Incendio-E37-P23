@@ -48,7 +48,7 @@ unsigned IRMuestasInvalidas;
 
 //Tiempo de muestreo de cada sensor
 //============================================================================
-const int muestreoDHT = 60000;
+const int muestreoDHT = 2000; //valor normal de 60000
 const int muestreoIR = 500;
 const int muestreoMQ = 3000;
 
@@ -61,7 +61,7 @@ unsigned long muestraDHT;
 
 //Tiempos de espera
 //============================================================================
-const int tiempoMaximo = 10000;
+const int tiempoMaximo = 100000;
 const int actualizacion = 600000;
 
 
@@ -117,10 +117,9 @@ void actualizacionTemp(float temp){
 	Serial.println(tempActual);
 }
 
-float resta(){
+float resta() {
 	return tempActual - tempAnterior;
 }
-
 //Funciones para el sensor IR
 //============================================================================
 int desc;
@@ -142,21 +141,44 @@ void lecturaMQ(){
 	Serial.printf("Los datos de MQ son: %d, %d.\n", filtrado, resistencia);
 	
 }
-
+/*
 bool isEsperaMaxima(){
     static unsigned long tiempo;
-    static bool flag;
+    static bool flag = false;
     if (estadoActual == SOSPECHA){
         tiempo += millis();
         flag = false;
-    }
-    if (tiempo >= tiempoMaximo){
-        tiempo = 0;
-        flag = true;
-    }
-    return flag;
+    	if (tiempo >= tiempoMaximo){
+        	tiempo = 0;
+        	flag = true;
+    	}
+	}
+	return flag;
 }
+*/
+bool isEsperaMaxima() {
+    static unsigned long tiempoInicio = 0;
+    static bool midiendo = false;
 
+    if (estadoActual == SOSPECHA) {
+        // Registra la marca de tiempo solo la primera vez que entra a este estado
+        if (!midiendo) {
+            tiempoInicio = millis(); 
+            midiendo = true;
+        }
+        
+        // Calcula la diferencia para ver si se alcanzó el tiempo máximo
+        if (millis() - tiempoInicio >= tiempoMaximo) {
+            midiendo = false; // Se reinicia el estado para futuros usos
+            return true;
+        }
+    } else {
+        // Si el estado cambia a VIGILANCIA o ALERTA, se aborta y reinicia el temporizador
+        midiendo = false; 
+    }
+    
+    return false;
+}
 /*
 void avisar(bool encender) {              // funcion para buzzer en caso de que placa no acepte ledc
   if (encender) tone(buzzer, 2000);
@@ -191,19 +213,17 @@ void cambioEstado(ESTADO actual){
 	}
 }
 
+bool lectura = true;
 void setup(){
 	Serial.begin(115200);
-	dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
+	dhtSensor.setup(DHT_PIN, DHTesp::DHT11);
 	analogSetPinAttenuation(MQ, ADC_11db);
 	pinMode(IR, INPUT_PULLUP);
 	ledcSetup(canalBuzzer, 2000, 8);
 	ledcAttachPin(buzzer, canalBuzzer);
 
 	//llamada por primera vez para obtener las primeras lecturas
-	lecturasDHT();
-	actualizacionTemp(temp);
-	lecturaMQ();
-	desc = nivelIR();
+	
 }
 
 void loop(){
@@ -212,6 +232,16 @@ void loop(){
 	static bool ac;
 	static bool senal;
 	
+	if (lectura){
+		Serial.println("Primera Lectura");
+		lecturasDHT();
+		actualizacionTemp(temp);
+		lecturaMQ();
+		desc = nivelIR();
+		lectura = false;
+		Serial.printf("Estado actual: %s\n", cambiarNombre(estadoActual));
+	}
+		
 
 	if (time - muestraMQ > muestreoMQ){
 		muestraMQ = millis();
@@ -246,7 +276,7 @@ void loop(){
 			if (resta() > 5 && ac != desc) cambioEstado(ALERTA_CONFIRMADA);
 			else if(isEsperaMaxima()) cambioEstado(VIGILANCIA);
 			else if(DHTlocalesInvalidas >= 3){
-				DHTlocalesInvalidas = 0;
+				DHTlocalesInvalidas = desc;
 				cambioEstado(ERROR);
 			}
 			break;
