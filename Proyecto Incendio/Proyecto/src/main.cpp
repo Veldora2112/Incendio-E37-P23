@@ -18,7 +18,7 @@ enum ESTADO {VIGILANCIA, SOSPECHA, ALERTA_CONFIRMADA, ERROR};
 ESTADO estadoActual = VIGILANCIA;
 ESTADO anterior;
 //Codigo dado por el profesor
-//=================================================================================c
+//=================================================================================
 const uint8_t N_FILTRO = 5;
 const bool USAR_MEDIANA = false;
 const float V_REF        = 3.3f;       // [V] tension de referencia del ADC
@@ -125,7 +125,7 @@ float resta() {
 int desc;
 int nivelIR(){
     int lectura = digitalRead(IR);
-	Serial.printf("El sensor IR esta actualmente en: %d\n", lectura);
+	Serial.printf("El sensor IR esta actualmente en: %d", lectura);
     return lectura;
 }
 
@@ -208,8 +208,8 @@ void cambioEstado(ESTADO actual){
     estadoActual = actual;
     if (actual != anterior){
 		DHTlocalesInvalidas = 0;
-		Serial.printf("Estado anterior: %s | Estado actual: %s\n", cambiarNombre(anterior), cambiarNombre(actual));
 		anterior = actual;
+		Serial.printf("Estado anterior: %s | Estado actual: %s\n", cambiarNombre(anterior), cambiarNombre(actual));
 	}
 }
 
