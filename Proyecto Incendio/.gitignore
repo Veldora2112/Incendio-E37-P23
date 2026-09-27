@@ -11,3 +11,4 @@
 
 # Wokwi (Solo si te genera registros temporales o dumps de simulación)
 *.log
+config.h
