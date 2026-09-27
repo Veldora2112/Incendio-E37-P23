@@ -5,6 +5,22 @@
 #include <ratio>
 #include "DHTesp.h"
 #include <iostream>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include "config.h"
+
+
+WiFiClient red;
+PubSubClient mqtt(red);
+
+String clientId, topicDatos, topicEstado, topicCmd;
+
+uint32_t tWiFi = 0;
+uint32_t tReconexion = 0;
+uint32_t esperaReconexion = 2000;
+const uint32_t ESPERA_MAXIMA = 30000;
+const uint32_t REINTENTO_WIFI_MS = 15000;
+
 // Declaracion para el funcionamiento del Sesnor DHT22
 const int DHT_PIN = 15;
 DHTesp dhtSensor;
@@ -47,6 +63,7 @@ unsigned muestras_invalidasMQ = 0;
 unsigned muestas_validasDHT = 0;
 unsigned muestras_invalidasDHT = 0;
 const unsigned short out = 10000;
+unsigned long tiempo_sospecha = 0;
 
 //=============================
 //INICIO DE DATOS DE MQ-2
@@ -198,8 +215,53 @@ bool isEsperaMaxima(){
     return flag;
 }
 
+void mantenerWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  
+  uint32_t ahora = millis();
+  if (ahora - tWiFi < REINTENTO_WIFI_MS) return;
+  
+  tWiFi = ahora;
+  Serial.println("[wifi] Sin red, reintentando...");
+  WiFi.reconnect(); 
+}
+
+void mantenerMQTT() {
+  if (mqtt.connected()) return;
+  if (WiFi.status() != WL_CONNECTED) return; 
+  
+  uint32_t ahora = millis();
+  if (ahora - tReconexion < esperaReconexion) return;
+  tReconexion = ahora;
+
+  Serial.printf("[mqtt] Conectando como %s ... ", clientId.c_str());
+  
+  if (mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS, topicEstado.c_str(), 1, true, "offline")) {
+    Serial.println("OK");
+    mqtt.publish(topicEstado.c_str(), "online", true); 
+    mqtt.subscribe(topicCmd.c_str(), 1);               
+    esperaReconexion = 2000;                           
+  } else {
+    Serial.printf("FALLO rc=%d\n", mqtt.state());
+    esperaReconexion = (esperaReconexion * 2 > ESPERA_MAXIMA) ? ESPERA_MAXIMA : esperaReconexion * 2;
+  }
+}
+
 void setup() {
     Serial.begin(115200);
+  clientId    = String(MQTT_USER) + "-" + NODO;
+  topicDatos  = String("curso/") + MQTT_USER + "/" + PROYECTO + "/" + NODO; 
+  topicEstado = topicDatos + "/estado";
+  topicCmd    = topicDatos + "/cmd";
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  tWiFi = millis();
+
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setKeepAlive(15);
+  mqtt.setSocketTimeout(3);
     dhtSensor.setup(DHT_PIN, DHTesp::DHT22);
     analogSetPinAttenuation(MQ, ADC_11db);
     //pinMode(IR, INPUT_PULLUP); 
@@ -220,15 +282,21 @@ void loop() {
     3. Actuador
     Composicion del loop para un correcto funcionamiento, 
     */
+  mantenerWiFi();
+  mantenerMQTT();
+  mqtt.loop();
 
-    unsigned long tiempo = millis();
+  unsigned long tiempo = millis();
+    
+    // Variables estáticas para retener memoria en los ciclos vacíos
+    static float resistenciaMQ = 4.0; // Valor alto inicial (aire limpio)
+    static byte estadoIR = 1;         // 1 = sin fuego
+    static byte t = 0;
+    static byte h = 0;
+    
     int MQfiltrado;
-    float resistenciaMQ;
-    byte estadoIR;
-    byte t;
-    byte h;
     bool senal;
-    unsigned long tiempo_sospecha;
+   
     //primer condicional: Ingesta de datos de MQ
     if (tiempo - muestraMQ > muestreoMQ){
         muestraMQ = tiempo;
