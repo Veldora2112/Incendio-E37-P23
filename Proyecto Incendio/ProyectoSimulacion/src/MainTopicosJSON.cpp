@@ -349,7 +349,7 @@ void loop() {
 
         if(mqtt.connected()){
             mqtt.publish(topicDatos.c_str(), (uint8_t*)buf, strlen(buf), true); //  Publicar el JSON en el topic de datos
-            Serial.print("JSON Publicado: ");  // Imprimir el JSON publicado en el monitor serial
+            Serial.print("JSON Publicado: ");  // Imprimir el JSON publicado en el monitor 
             Serial.println(buf);
         }
     }
