@@ -24,7 +24,7 @@ const bool USAR_MEDIANA = false;
 const float V_REF        = 3.3f;       // [V] tension de referencia del ADC
 const uint16_t CUENTAS_MAX = 4095;     // ADC de 12 bits: 0 a 4095
 const float ESCALA_SENSOR = -0.36f;    // [grados C / V] sensibilidad nominal
-const float OFFSET_SENSOR = 0.65f;  
+const float OFFSET_SENSOR = 0.65f;
 
 //Estado interno
 //=================================================================================
@@ -68,8 +68,8 @@ const int actualizacion = 600000;
 //Funciones basicas para el sensor MQ-2
 //============================================================================
 //Declaraciones necesarias para funciones del sensor MQ-2
-const float VC_MV = 5000.0;  
-const float RL_KOHM = 2.0;  
+const float VC_MV = 5000.0;
+const float RL_KOHM = 2.0;
 int leer_mv(){
     long suma;
     for (int i= 0; i < 5; i++) suma += analogReadMilliVolts(MQ);
@@ -94,10 +94,7 @@ float resistencia_kohm(int mv) {          // divisor RS-RL del modulo
 //Funciones para el sensor DHT-22
 //============================================================================
 //Inicio de variables globales para dht
-float temp;
-float tempAnterior;
-float humedad;
-float tempActual;
+float temp, tempAnterior, humedad, tempActual;
 void lecturasDHT(){
 	TempAndHumidity data = dhtSensor.getTempAndHumidity();
 	temp = data.temperature;
@@ -125,7 +122,7 @@ float resta() {
 int desc;
 int nivelIR(){
     int lectura = digitalRead(IR);
-	Serial.printf("El sensor IR esta actualmente en: %d", lectura);
+	Serial.printf("El sensor IR esta actualmente en: %d\n", lectura);
     return lectura;
 }
 
@@ -139,7 +136,7 @@ void lecturaMQ(){
 	if (resistencia != -1) MQmuestrasValidas +=1;
 	else MQmuestrasInvalidas +=1;
 	Serial.printf("Los datos de MQ son: %d, %d.\n", filtrado, resistencia);
-	
+
 }
 /*
 bool isEsperaMaxima(){
@@ -163,10 +160,10 @@ bool isEsperaMaxima() {
     if (estadoActual == SOSPECHA) {
         // Registra la marca de tiempo solo la primera vez que entra a este estado
         if (!midiendo) {
-            tiempoInicio = millis(); 
+            tiempoInicio = millis();
             midiendo = true;
         }
-        
+
         // Calcula la diferencia para ver si se alcanzó el tiempo máximo
         if (millis() - tiempoInicio >= tiempoMaximo) {
             midiendo = false; // Se reinicia el estado para futuros usos
@@ -174,9 +171,9 @@ bool isEsperaMaxima() {
         }
     } else {
         // Si el estado cambia a VIGILANCIA o ALERTA, se aborta y reinicia el temporizador
-        midiendo = false; 
+        midiendo = false;
     }
-    
+
     return false;
 }
 /*
@@ -223,7 +220,7 @@ void setup(){
 	ledcAttachPin(buzzer, canalBuzzer);
 
 	//llamada por primera vez para obtener las primeras lecturas
-	
+
 }
 
 void loop(){
@@ -231,7 +228,7 @@ void loop(){
 	unsigned long ultimoTimeAc = 0;
 	static bool ac;
 	static bool senal;
-	
+
 	if (lectura){
 		Serial.println("Primera Lectura");
 		lecturasDHT();
@@ -241,7 +238,7 @@ void loop(){
 		lectura = false;
 		Serial.printf("Estado actual: %s\n", cambiarNombre(estadoActual));
 	}
-		
+
 
 	if (time - muestraMQ > muestreoMQ){
 		muestraMQ = millis();
