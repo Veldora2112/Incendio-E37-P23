@@ -6,6 +6,20 @@
 #include <ratio>
 #include "DHTesp.h"
 #include <iostream>
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include "config.h"
+
+WiFiClient red;
+PubSubClient mqtt(red);
+
+String clientId, topicDatos, topicEstado, topicCmd;
+
+uint32_t tWiFi = 0;
+uint32_t tReconexion = 0;
+uint32_t esperaReconexion = 2000;
+const uint32_t ESPERA_MAXIMA_MQTT = 30000;
+const uint32_t REINTENTO_WIFI_MS = 15000;
 
 DHTesp dhtSensor;
 const byte DHT_PIN = 15;
@@ -211,8 +225,60 @@ void cambioEstado(ESTADO actual){
 }
 
 bool lectura = true;
+
+void mantenerWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  
+  uint32_t ahora = millis();
+  if (ahora - tWiFi < REINTENTO_WIFI_MS) return;
+  
+  tWiFi = ahora;
+  Serial.println("[wifi] Sin red, reintentando...");
+  WiFi.reconnect(); 
+}
+
+void mantenerMQTT() {
+  if (mqtt.connected()) return;
+  if (WiFi.status() != WL_CONNECTED) return; 
+  
+  uint32_t ahora = millis();
+  if (ahora - tReconexion < esperaReconexion) return;
+  tReconexion = ahora;
+
+  Serial.printf("[mqtt] Conectando como %s ... ", clientId.c_str());
+  
+  if (mqtt.connect(clientId.c_str(), MQTT_USER, MQTT_PASS, topicEstado.c_str(), 1, true, "offline")) {
+    Serial.println("OK");
+    mqtt.publish(topicEstado.c_str(), "online", true); 
+    mqtt.subscribe(topicCmd.c_str(), 1);               
+    esperaReconexion = 2000;                           
+  } else {
+    Serial.printf("FALLO rc=%d\n", mqtt.state());
+    esperaReconexion = (esperaReconexion * 2 > ESPERA_MAXIMA_MQTT) ? ESPERA_MAXIMA_MQTT : esperaReconexion * 2;
+  }
+}
+
+
+
+
 void setup(){
 	Serial.begin(115200);
+	clientId    = String(MQTT_USER) + "-" + NODO;
+  topicDatos  = String("curso/") + MQTT_USER + "/" + PROYECTO + "/" + NODO; 
+  topicEstado = topicDatos + "/estado";
+  topicCmd    = topicDatos + "/cmd";
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  tWiFi = millis();
+
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setKeepAlive(15);
+  mqtt.setSocketTimeout(3);
+	
+
+	
 	dhtSensor.setup(DHT_PIN, DHTesp::DHT11);
 	analogSetPinAttenuation(MQ, ADC_11db);
 	pinMode(IR, INPUT_PULLUP);
@@ -224,8 +290,12 @@ void setup(){
 }
 
 void loop(){
+	mantenerWiFi();
+	mantenerMQTT();
+	mqtt.loop();
+
 	unsigned long time = millis();
-	unsigned long ultimoTimeAc = 0;
+	static unsigned long ultimoTimeAc = 0; 
 	static bool ac;
 	static bool senal;
 
