@@ -206,7 +206,7 @@ void avisar(bool encender){         //funcion para buzzer / ledc
     if (encender) {
     ledcWriteTone(canalBuzzer, 2000);     // Emite el tono de 2000 Hz
     } else {
-    ledcWriteTone(canalBuzzer, 0);        // Frecuencia 0 para silenciar (equivale a noTone)
+    ledcWriteTone(canalBuzzer, 0);        // Frecuencia 0 para silenciar ((equivale a noTone))
   }
 }
 
