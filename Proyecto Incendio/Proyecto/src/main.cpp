@@ -22,7 +22,7 @@ uint32_t tPub = 0;
 uint32_t esperaReconexion = 2000;
 const uint32_t ESPERA_MAXIMA_MQTT = 30000;
 const uint32_t REINTENTO_WIFI_MS = 15000;
-onst uint32_t PERIODO_PUB_MS = 10000;
+const uint32_t PERIODO_PUB_MS = 10000;
 
 DHTesp dhtSensor;
 const byte DHT_PIN = 15;
@@ -128,8 +128,11 @@ void lecturasDHT(){
 	Serial.printf("La temperatura es: %.2f y la humedad es: %.2f\n", temp, humedad);
 }
 
-void actualizacionTemp(float temp){
-	if (isnan(temp)) tempActual = temp;
+void actualizacionTemp(float temp_nueva){
+	if (!isnan(temp_nueva)) {
+        tempAnterior = tempActual; // Guarda el valor viejo antes de sobreescribir
+        tempActual = temp_nueva;
+    }
 	Serial.print("La temperatura actual es: ");
 	Serial.println(tempActual);
 }
@@ -347,15 +350,23 @@ void loop(){
     publicarDatos();
 	}
 	
-	if (lectura){
-		Serial.println("Primera Lectura");
-		lecturasDHT();
-		actualizacionTemp(temp);
-		lecturaMQ();
-		desc = nivelIR();
-		lectura = false;
-		Serial.printf("Estado actual: %s\n", cambiarNombre(estadoActual));
-	}
+  if (lectura){
+      Serial.println("Primera Lectura");
+      lecturasDHT();
+      
+      // Evitar el "choque térmico" inicial igualando ambas temperaturas
+      tempActual = temp;
+      tempAnterior = temp;
+      
+      lecturaMQ();
+      
+      // Evitar el desfase inicial del Infrarrojo sincronizando las variables
+      desc = nivelIR();
+      ac = desc; 
+      
+      lectura = false;
+      Serial.printf("Estado actual: %s\n", cambiarNombre(estadoActual));
+  }
 
 
 	if (time - muestraMQ > muestreoMQ){
@@ -374,9 +385,8 @@ void loop(){
 		muestraIR = millis();
 		ac = nivelIR();
 	}
-
+    /*
     static uint32_t t_pub = 0;
-    const uint32_t PERIODO_PUB_MS = 10000; 
 
     if (time - t_pub > PERIODO_PUB_MS) {
         t_pub = time;
@@ -396,6 +406,7 @@ void loop(){
             Serial.println(buf);
         }
     }
+        */
 
 	switch(estadoActual){
 		case VIGILANCIA:{
@@ -413,7 +424,7 @@ void loop(){
 			if (resta() > 5 && ac != desc) cambioEstado(ALERTA_CONFIRMADA);
 			else if(isEsperaMaxima()) cambioEstado(VIGILANCIA);
 			else if(DHTlocalesInvalidas >= 3){
-				DHTlocalesInvalidas = desc;
+				DHTlocalesInvalidas = 0;
 				cambioEstado(ERROR);
 			}
 			break;
