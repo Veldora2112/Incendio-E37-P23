@@ -18,9 +18,11 @@ String clientId, topicDatos, topicEstado, topicCmd;
 
 uint32_t tWiFi = 0;
 uint32_t tReconexion = 0;
+uint32_t tPub = 0;
 uint32_t esperaReconexion = 2000;
 const uint32_t ESPERA_MAXIMA_MQTT = 30000;
 const uint32_t REINTENTO_WIFI_MS = 15000;
+onst uint32_t PERIODO_PUB_MS = 10000;
 
 DHTesp dhtSensor;
 const byte DHT_PIN = 15;
@@ -248,6 +250,16 @@ void mantenerWiFi() {
   WiFi.reconnect(); 
 }
 
+void recibirComando(char* topic, byte* payload, unsigned int largo) {
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, payload, largo);
+  if (error) {
+    Serial.printf("[cmd] JSON invalido en %s: %s\n", topic, error.c_str());
+    return;
+  }
+  Serial.printf("[cmd] recibido en %s\n", topic);
+}
+
 void mantenerMQTT() {
   if (mqtt.connected()) return;
   if (WiFi.status() != WL_CONNECTED) return; 
@@ -269,6 +281,31 @@ void mantenerMQTT() {
   }
 }
 
+void publicarDatos() {
+  if (!mqtt.connected()) return;
+
+  JsonDocument doc;
+  bool sensorOk = (!isnan(temp) && !isnan(humedad));
+
+  if (sensorOk) {
+    doc["temperatura"] = roundf(temp * 10.0f) / 10.0f;
+    doc["humedad"]     = roundf(humedad * 10.0f) / 10.0f;
+  }
+  
+  doc["sensor_ok"] = sensorOk ? 1 : 0;
+  doc["estado_sistema"] = cambiarNombre(estadoActual);
+  doc["rssi_dbm"]  = WiFi.RSSI();
+
+  char payload[256];
+  size_t n = serializeJson(doc, payload, sizeof(payload));
+
+  if (mqtt.publish(topicDatos.c_str(), (const uint8_t*)payload, n, false)) {
+    Serial.printf("[pub] %s -> %s\n", topicDatos.c_str(), payload);
+  } else {
+    Serial.println("[pub] ERROR publish()");
+  }
+}
+
 void setup(){
 	Serial.begin(115200);
 	clientId    = String(MQTT_USER) + "-" + NODO;
@@ -282,6 +319,7 @@ void setup(){
   tWiFi = millis();
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
+	mqtt.setCallback(recibirComando);
   mqtt.setKeepAlive(15);
   mqtt.setSocketTimeout(3);
 	
@@ -304,6 +342,11 @@ void loop(){
 	static bool ac;
 	static bool senal;
 
+	if (time - tPub >= PERIODO_PUB_MS) {
+    tPub = time;
+    publicarDatos();
+	}
+	
 	if (lectura){
 		Serial.println("Primera Lectura");
 		lecturasDHT();
