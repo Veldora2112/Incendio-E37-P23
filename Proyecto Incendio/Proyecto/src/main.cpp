@@ -18,9 +18,11 @@ String clientId, topicDatos, topicEstado, topicCmd;
 
 uint32_t tWiFi = 0;
 uint32_t tReconexion = 0;
+unit32_t tPub = 0;
 uint32_t esperaReconexion = 2000;
 const uint32_t ESPERA_MAXIMA_MQTT = 30000;
 const uint32_t REINTENTO_WIFI_MS = 15000;
+const unit32_t PERIODO_PUB_MS = 10000;
 
 DHTesp dhtSensor;
 const byte DHT_PIN = 15;
@@ -85,11 +87,8 @@ const int actualizacion = 600000;
 //Declaraciones necesarias para funciones del sensor MQ-2
 const float VC_MV = 5000.0;
 const float RL_KOHM = 2.0;
-
-float resistenciaMQ = -1.0; 
-
 int leer_mv(){
-    long suma = 0;
+    long suma;
     for (int i= 0; i < 5; i++) suma += analogReadMilliVolts(MQ);
     return (int)(suma/5);
 }
@@ -150,12 +149,12 @@ int nivelIR(){
 void lecturaMQ(){
 	int suma = leer_mv();
 	int filtrado = filtrar(suma);
-	resistenciaMQ = resistencia_kohm(filtrado);
-	if (resistenciaMQ != -1.0) MQmuestrasValidas +=1;
+	int resistencia = resistencia_kohm(filtrado);
+	if (resistencia != -1) MQmuestrasValidas +=1;
 	else MQmuestrasInvalidas +=1;
-	Serial.printf("Los datos de MQ son: %d, %.2f.\n", filtrado, resistenciaMQ);
-}
+	Serial.printf("Los datos de MQ son: %d, %d.\n", filtrado, resistencia);
 
+}
 /*
 bool isEsperaMaxima(){
     static unsigned long tiempo;
@@ -194,7 +193,6 @@ bool isEsperaMaxima() {
 
     return false;
 }
-
 /*
 void avisar(bool encender) {              // funcion para buzzer en caso de que placa no acepte ledc
   if (encender) tone(buzzer, 2000);
@@ -219,20 +217,14 @@ const char* cambiarNombre(ESTADO e) {
   }
   return "?";
 }
-
 //Funcion para poder ver el cambio de nombre a lo largo de la comunicacion serial
 void cambioEstado(ESTADO actual){
     estadoActual = actual;
     if (actual != anterior){
 		DHTlocalesInvalidas = 0;
-        ESTADO temp_anterior = anterior; 
 		anterior = actual;
-		Serial.printf("Estado anterior: %s | Estado actual: %s\n", cambiarNombre(temp_anterior), cambiarNombre(actual));
-	    
-        if (mqtt.connected()) {
-            mqtt.publish(topicEstado.c_str(), cambiarNombre(actual), true);
-        }
-    }
+		Serial.printf("Estado anterior: %s | Estado actual: %s\n", cambiarNombre(anterior), cambiarNombre(actual));
+	}
 }
 
 bool lectura = true;
@@ -246,6 +238,16 @@ void mantenerWiFi() {
   tWiFi = ahora;
   Serial.println("[wifi] Sin red, reintentando...");
   WiFi.reconnect(); 
+}
+
+void recibirComando(char* topic, byte* payload, unsigned int largo){
+	JsonDocument doc;
+	DeserializationError error = deserializeJson(doc, payload, largo);
+	if (error) {
+		Serial.printf("[cmd] JSON invalido en %s: %s\n", topic, error.c_str());
+		return;
+	}
+	Serial.printf("[cmd] recibido en %s\n", topic);
 }
 
 void mantenerMQTT() {
@@ -269,12 +271,35 @@ void mantenerMQTT() {
   }
 }
 
+void publicarDatos(){
+	if(!mqtt.connected()) return;
+	JsonDocument doc;
+	bool sensorOk = (!isnan(temp) && !isnan(humedad));
+	if (sensorOk){
+		doc["temperatura"] = roundf(temp * 10.0f) / 10.0f;
+		doc["humedad"] = roundf(humedad * 10.0f) / 10.0f;
+	}
+	doc["sensor_ok"] = sensorOk ? 1 : 0;
+	doc["estado_sistema"] = cambirNombre(estadoActual);
+	doc["rssi_dbm"] = WiFi.RSSI();
+	char payload[256];
+	size_t n = serializeJson(doc, payload, sizeof(payload));
+	if (mqtt.publish(topicDatos.c_str(), (const uint8_t*)payload, n, false)) {
+		Serial.printf("[pub] %s -> %s\n", topicDatos.c_str(), payload);
+	} else {
+		Serial.println("[pub] ERROR publish()");
+  }
+}
+
+
+
+
 void setup(){
 	Serial.begin(115200);
 	clientId    = String(MQTT_USER) + "-" + NODO;
-    topicDatos  = String("curso/") + MQTT_USER + "/" + PROYECTO + "/" + NODO; 
-    topicEstado = topicDatos + "/estado";
-    topicCmd    = topicDatos + "/cmd";
+  topicDatos  = String("curso/") + MQTT_USER + "/" + PROYECTO + "/" + NODO; 
+  topicEstado = topicDatos + "/estado";
+  topicCmd    = topicDatos + "/cmd";
 
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -282,8 +307,11 @@ void setup(){
   tWiFi = millis();
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
+	mqtt.setCallback(recibierComando);
   mqtt.setKeepAlive(15);
   mqtt.setSocketTimeout(3);
+	
+
 	
 	dhtSensor.setup(DHT_PIN, DHTesp::DHT11);
 	analogSetPinAttenuation(MQ, ADC_11db);
@@ -292,6 +320,7 @@ void setup(){
 	ledcAttachPin(buzzer, canalBuzzer);
 
 	//llamada por primera vez para obtener las primeras lecturas
+
 }
 
 void loop(){
@@ -303,6 +332,11 @@ void loop(){
 	static unsigned long ultimoTimeAc = 0; 
 	static bool ac;
 	static bool senal;
+	
+	if (time - tPub >= PERIODO_PUB_MS) {
+    	tPub = time;
+    	publicarDatos();
+ 	}
 
 	if (lectura){
 		Serial.println("Primera Lectura");
@@ -331,28 +365,6 @@ void loop(){
 		muestraIR = millis();
 		ac = nivelIR();
 	}
-
-    static uint32_t t_pub = 0;
-    const uint32_t PERIODO_PUB_MS = 10000; 
-
-    if (time - t_pub > PERIODO_PUB_MS) {
-        t_pub = time;
-
-        JsonDocument doc;
-        doc["temperatura"] = temp; 
-        doc["humedad"] = humedad;
-        doc["resistencia"] = resistenciaMQ;
-        doc["fuego"] = (ac == 0); 
-        
-        char buf[256];
-        serializeJson(doc, buf);
-
-        if(mqtt.connected()){
-            mqtt.publish(topicDatos.c_str(), (uint8_t*)buf, strlen(buf), true);
-            Serial.print("JSON Publicado: ");
-            Serial.println(buf);
-        }
-    }
 
 	switch(estadoActual){
 		case VIGILANCIA:{
