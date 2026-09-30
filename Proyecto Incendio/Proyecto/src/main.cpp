@@ -144,10 +144,11 @@ float resta() {
 //============================================================================
 int desc;
 int lecturaIR;
+int ac;
 int nivelIR(){
     lecturaIR = digitalRead(IR);
-	Serial.printf("El sensor IR esta actualmente en: %d\n", lectura);
-    return lectura;
+	Serial.printf("El sensor IR esta actualmente en: %d\n", lecturaIR);
+    return lecturaIR;
 }
 
 
@@ -296,6 +297,10 @@ void publicarDatos() {
     doc["humedad"]     = roundf(humedad * 10.0f) / 10.0f;
   }
   
+  if(resistenciaMQ != -1.0){
+    doc["resistencia_mq"] = roundf(resistenciaMQ * 100.0f) / 100.0f;
+  }
+
   doc["sensor_ok"] = sensorOk ? 1 : 0;
   doc["estado_sistema"] = cambiarNombre(estadoActual);
   doc["rssi_dbm"]  = WiFi.RSSI();
@@ -307,24 +312,6 @@ void publicarDatos() {
     Serial.printf("[pub] %s -> %s\n", topicDatos.c_str(), payload);
   } else {
     Serial.println("[pub] ERROR publish()");
-
-  }
-
-  if(resistenciaMQ != -1.0){
-    doc["resistencia_mq"] = roundf(resistenciaMQ * 100f) / 100.0f;
-  }
-
-  doc["sensor_ok"] = sensorOk ? 1 : 0;
-  doc["estado_sistema"] = cambiarNombre(estadoActual);
-  doc["rssi_dbm"] = WiFi.RSSI();
-
-  char payload[256];
-  size_t n = serializeJson(doc, payload, sizeof(payload));
-  if (mqtt.publish(topicDatos.c_str(),(const uint8_t*)payload, n, false)){
-    Serial.printf("[pub] %s -> %s/n", topicDatos.c_str(), payload);
-
-  } else  {
-    Serial.printf("[pub] ERROR publish()");
   }
 }
 
