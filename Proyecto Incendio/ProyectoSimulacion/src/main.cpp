@@ -8,7 +8,18 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include "config.h"
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
+const uint8_t ANCHO_PANTALLA = 128;
+const uint8_t ALTO_PANTALLA = 64; 
+const int8_t OLED_RESET = -1; 
+const uint8_t DIRECCION_OLED = 0x3C; 
+
+Adafruit_SSD1306 display(ANCHO_PANTALLA, ALTO_PANTALLA, &Wire, OLED:RESET);
+const int muestreoPantalla = 1000; 
+unsigned long muestraPantalla = 0;  
 
 WiFiClient red;
 PubSubClient mqtt(red);
@@ -247,6 +258,46 @@ void mantenerMQTT() {
   }
 }
 
+const char* obtenerNombreEstado(ESTADO actual) {
+  switch (actual){
+    case VIGILANCIA: return "VIGILANCIA"; 
+    case SOSPECHA:  return "SOSPECHA"; 
+    case ALERTA_CONFIRMADA: return "ALERTA CONF."; 
+    case ERROR: return "ERROR"; 
+  }
+  return "DESCONOCIDO"; 
+}
+void actualizarPantalla(float rs, byte irVal, byte tempVal, byte humVal) {
+  display.clearDisplay(); 
+  display.setTextSize(1); 
+  display.setTextColor(SSD1306_WHITE); 
+
+  display.setCursor(0,0); 
+  display.printf("ESTADO: %s", obtenerNombreEstado(estadoActual)); 
+  display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
+
+  display.setCursor(0,15); 
+  display.printf("Temp: %d C", tempVal); 
+
+  display.setCursor(0,25); 
+  display.printf("Humedad: %d %%", humVal); 
+
+  display.setCursor(0,35); 
+  if (rs < 0) {
+      display.print("Gas: Invalido"); 
+  } else {
+      display.printf("Gas Rs: %.2f kOh", rs);
+  }
+  display.setCursor(0,45); 
+  display.printf("Llama: %s", (irVal==0)? "FUEGO DETECTADO" : "NORMAL"); 
+
+  display.setCursor(0, 55); 
+  display.printf("WiFI:%s MQTT:%s",
+                  (WiFi.status() == WL_CONNECTED) ? "OK" : "NO", 
+                  mqtt.connected() ? "OK" : "NO");
+  display.display(); 
+}
+
 void setup() {
     Serial.begin(115200);
   clientId    = String(MQTT_USER) + "-" + NODO;
@@ -271,8 +322,18 @@ void setup() {
     
     ledcSetup(canalBuzzer, 2000, 8);
     ledcAttachPin(buzzer, canalBuzzer);
-    
 
+  Wire.begin(21, 22); 
+  if (!display.begin(SSD1306_SWITCHCAPVCC, DIRECCION_OLED)) {
+    Serial.println("[OLED] Error al iniciar");
+  } else {
+      display.clearDisplay(); 
+      display.setTextSize(1); 
+      display.setTextColor(SSD1306_WHITE); 
+      display.setCursor(15, 25); 
+      display.println("INICIANDO NODO.."); 
+      display.display(); 
+  }
 }
 
 void loop() {
@@ -325,6 +386,13 @@ void loop() {
         h = data.humidity;
         //agregar condicional para aumentar muestras invalidas
         //agregar print para json
+    }
+
+    //Refresco periodico de la pantalla cada 1000ms
+    if (tiempo - muestraPantalla > muestreoPantalla) {
+      muestraPantalla = tiempo; 
+      actualizarPantalla(resistenciaMQ, estadoIR, t, h); 
+
     }
 
     switch (estadoActual) {
