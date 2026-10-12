@@ -158,3 +158,23 @@ Desviacion respecto del comportamiento ideal declarado:
 
 ---
 
+### GT5
+
+#### Ruta de Ingesta
+ESP32 -> MQTT Broker -> Telegraf -> InfluxDB
+
+#### Bucket/Measurement
+- bucket: "mediciones"
+- measurement: "mediciones"
+
+#### Tags propios
+- 'equipo':'E37'
+- 'proyecto':'P23'
+- 'nodo':'demo'
+
+#### Fields del proyecto
+- **humedad**
+- **temperatura**
+- **resistencia_mq**
+- **rssi_dbm**
+- **sensor_ok**

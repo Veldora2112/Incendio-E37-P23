@@ -13,7 +13,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
+int valorMQ;
 const uint8_t ANCHO_PANTALLA = 128; 
 const uint8_t ALTO_PANTALLA = 64; 
 const int8_t OLED_RESET = -1; 
@@ -411,6 +411,8 @@ void setup(){
 	//llamada por primera vez para obtener las primeras lecturas
 }
 
+
+
 void loop(){
 	mantenerWiFi();
 	mantenerMQTT();
@@ -447,6 +449,7 @@ void loop(){
 	if (time - muestraMQ > muestreoMQ){
 		muestraMQ = millis();
 		lecturaMQ();
+    valorMQ = resistenciaMQ;
 	}
 
 	if (time - muestraDHT > muestreoDHT){
@@ -492,8 +495,8 @@ void loop(){
 	switch(estadoActual){
 		case VIGILANCIA:{
 			senal = false;
-			if (resta() > 5 || ac != desc) cambioEstado(SOSPECHA);
-			else if( resta() > 5 && ac != desc) cambioEstado(ALERTA_CONFIRMADA);
+			if (valorMQ < 20 || ac != desc) cambioEstado(SOSPECHA);
+			else if( valorMQ > 2200 && ac != desc) cambioEstado(ALERTA_CONFIRMADA);
 			else if(DHTlocalesInvalidas >= 3){
 				DHTlocalesInvalidas = 0;
 				cambioEstado(ERROR);
@@ -502,7 +505,7 @@ void loop(){
 		}
 		case SOSPECHA:{
 			senal = false;
-			if (resta() > 5 && ac != desc) cambioEstado(ALERTA_CONFIRMADA);
+			if (valorMQ < 15 && ac != desc) cambioEstado(ALERTA_CONFIRMADA);
 			else if(isEsperaMaxima()) cambioEstado(VIGILANCIA);
 			else if(DHTlocalesInvalidas >= 3){
 				DHTlocalesInvalidas = 0;
@@ -513,8 +516,8 @@ void loop(){
 		case ALERTA_CONFIRMADA:{
 			senal = true;
 			avisar(senal);
-			if (resta() < 3 && ac == desc) cambioEstado(VIGILANCIA);
-			else if(resta() < 5 || ac == desc) cambioEstado(SOSPECHA);
+			if (valorMQ > 30 && ac == desc) cambioEstado(VIGILANCIA);
+			else if(valorMQ > 15 || ac == desc) cambioEstado(SOSPECHA);
 			else if(DHTlocalesInvalidas >= 3){
 				DHTlocalesInvalidas = 0;
 				cambioEstado(ERROR);
